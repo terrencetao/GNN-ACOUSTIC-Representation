@@ -1,12 +1,12 @@
 #python3 process_yemba.py --drop_freq 0.5 --drop_int 0.3 --feature spec  run this one time
 
-for unit in $(seq 15 500 3000);do
+for unit in $(seq 1 1 500);do
 for mma in fixed dtw ;do
 python3 generate_similarity_matrix_acoustic.py --sub_unit $unit --method $mma --dataset yemba_command
 
 
 
-python3 weak_ML2.py --epochs 10 --dataset yemba_command
+
 
 for msa in mixed dtw ;do
 for alpha in $(seq 2.0 1.0  2.0);do
