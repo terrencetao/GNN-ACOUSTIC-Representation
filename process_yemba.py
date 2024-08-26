@@ -255,8 +255,8 @@ if __name__ == "__main__":
     val_spectrogram_ds = make_spec_ds(val_ds, feature, drop_int, drop_freq)
 
     # Save the datasets as TFRecords
-    save_dataset(train_spectrogram_ds, os.path.join(save_dir, 'train_spectrograms'))
-    save_dataset(val_spectrogram_ds, os.path.join(save_dir, 'val_spectrograms'))
+    save_dataset(train_spectrogram_ds, os.path.join(save_dir, 'train_spectrogram_ds'))
+    save_dataset(val_spectrogram_ds, os.path.join(save_dir, 'val_spectrogram_ds'))
     
     # Save the datasets as Pickle files
     #save_dataset_as_pickle(train_spectrogram_ds, os.path.join(save_dir, 'train_spectrograms.pkl'))
