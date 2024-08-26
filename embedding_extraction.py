@@ -238,16 +238,17 @@ parser.add_argument('--drop_freq', help='dim frequency ', required=False)
 parser.add_argument('--drop_int', help='dim amplitude ', required=False) 
 parser.add_argument('--sub_units', help='fraction of data', required=True)  
 parser.add_argument('--dataset', help='name of dataset', required=True)
+parser.add_argument('--base_dir', help='feature type: spec or mfcc', required=True)
 args = parser.parse_args()
 
 
 # Paths
-graph_folder = os.path.join('saved_graphs',args.dataset,args.mma,args.msa)
-model_folder = 'models'
-matrix_folder = os.path.join('saved_matrix',args.dataset, args.mma)
+graph_folder = os.path.join(args.base_dir,'saved_graphs',args.dataset,args.mma,args.msa)
+model_folder = os.path.join(args.base_dir,'models')
+matrix_folder = os.path.join(args.base_dir,'saved_matrix',args.dataset, args.mma)
 
 # Create a new directory for saving embeddings
-embedding_folder = os.path.join('saved_embeddings', args.dataset, args.mma, args.msa, f'sub_units_{args.sub_units}')
+embedding_folder = os.path.join(args.base_dir,'saved_embeddings', args.dataset, args.mma, args.msa, f'sub_units_{args.sub_units}')
 os.makedirs(embedding_folder, exist_ok=True)
 
 # Load the homogeneous graph

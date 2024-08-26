@@ -149,14 +149,15 @@ if __name__ == "__main__":
 	parser.add_argument('--sub_units', help='fraction of data', required=True)    
 	parser.add_argument('--method', help='', required=True)
 	parser.add_argument('--dataset', help='name of dataset', required=True)
-
+	parser.add_argument('--base_dir', help='feature type: spec or mfcc', required=True)
+        
 	args = parser.parse_args()
 	sub_units = int(args.sub_units)    
 	 
 	# Define the directory where datasets are saved
-	data_dir = os.path.join('saved_datasets',args.dataset)
+	data_dir = os.path.join(args.base_dir,'saved_datasets',args.dataset)
 	# Define the directory to save the datasets
-	save_dir = os.path.join('saved_matrix',args.dataset, args.method)
+	save_dir = os.path.join(args.base_dir,'saved_matrix',args.dataset, args.method)
 	os.makedirs(save_dir, exist_ok=True)
 	# File paths
 	similarity_matrix_path = os.path.join(save_dir, f'similarity_matrix_with_labels_{sub_units}.npy')

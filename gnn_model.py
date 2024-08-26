@@ -128,6 +128,7 @@ if __name__ == "__main__":
 	parser.add_argument('--input_folder', help ='source folder')
 	parser.add_argument('--graph_file', help ='graph for trainning')
 	parser.add_argument('--epochs', help='number of epochs', required=True)
+	parser.add_argument('--base_dir', help='feature type: spec or mfcc', required=True)
 	 
 	args = parser.parse_args()
 	input_folder = args.input_folder    
@@ -136,7 +137,7 @@ if __name__ == "__main__":
 
 
 
-	glist, label_dict = load_graphs(os.path.join(input_folder,graph_file))
+	glist, label_dict = load_graphs(os.path.join(args.base_dir,input_folder,graph_file))
 	dgl_G = glist[0]  
 
 	features = dgl_G.ndata['feat']

@@ -179,10 +179,12 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', help='name of dataset', required=True)
     parser.add_argument('--sub_units', help='fraction of data', required=True) 
     parser.add_argument('--method_sim', help='', required=True)
+    parser.add_argument('--base_dir', help='feature type: spec or mfcc', required=True)
+    
     args = parser.parse_args()
     sub_units = int(args.sub_units)
     
-    matrix_dir = os.path.join('saved_matrix',args.dataset, args.method_sim)
+    matrix_dir = os.path.join(args.base_dir,'saved_matrix',args.dataset, args.method_sim)
     matrix_with_labels = np.load(os.path.join(matrix_dir,f'similarity_matrix_with_labels_{sub_units}.npy'))
     labels = matrix_with_labels[:, 0]
     similarity_matrix = matrix_with_labels[:, 1:]
@@ -190,7 +192,7 @@ if __name__ == "__main__":
     subset_spectrogram = np.load(os.path.join(matrix_dir,f'subset_spectrogram_{sub_units}.npy'))
 
     #print(subset_spectrogram[0])
-    save_dir = os.path.join('saved_graphs',args.dataset,args.method_sim, args.method)
+    save_dir = os.path.join(args.base_dir,'saved_graphs',args.dataset,args.method_sim, args.method)
     os.makedirs(save_dir, exist_ok=True)
     kws_graph_path = os.path.join(save_dir, f"kws_graph_{args.num_n}_{sub_units}.dgl")
     if not os.path.isfile(kws_graph_path):

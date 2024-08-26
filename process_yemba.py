@@ -145,13 +145,14 @@ if __name__ == "__main__":
     parser.add_argument('--drop_freq', help='dim frequency ', required=False)  
     parser.add_argument('--drop_int', help='dim amplitude ', required=False) 
     parser.add_argument('--feature', help='feature type: spec or mfcc', required=True)
+    parser.add_argument('--base_dir', help='feature type: spec or mfcc', required=True)
 
     args = parser.parse_args()
     drop_freq = float(args.drop_freq) if args.drop_freq else 0.0
     drop_int = float(args.drop_int) if args.drop_int else 0.0
     feature = args.feature
     
-    extract_path = 'data/yemba'
+    extract_path = os.path.join (args.base_dir,'data/yemba')
     xlsx_path = f'{extract_path}/corpus_words.xlsx'
 
     # Unzip the dataset
@@ -173,9 +174,9 @@ if __name__ == "__main__":
     
     # Assuming audio files are now in their respective word folders
     data_dir = pathlib.Path(extract_path)
-    train_dir = pathlib.Path('data/yemba/train')
-    test_dir = pathlib.Path('data/yemba/test')
-    save_dir = 'saved_datasets/yemba_command'
+    train_dir = pathlib.Path(f'{ extract_path}/train')
+    test_dir = pathlib.Path(f'{ extract_path}/test')
+    save_dir = f'{args.base_dir}/saved_datasets/yemba_command'
 
     # Ensure the train and test directories are created
     os.makedirs(train_dir, exist_ok=True)
@@ -244,11 +245,7 @@ if __name__ == "__main__":
     train_ds = train_ds.map(squeeze, tf.data.AUTOTUNE)
     val_ds = val_ds.map(squeeze, tf.data.AUTOTUNE)
 
-    
-
-    # Define the directory to save the datasets
-    save_dir = 'saved_datasets/yemba_command'
-    os.makedirs(save_dir, exist_ok=True)
+   
 
     # Save filenames to CSV
     save_filenames_to_csv(train_files, save_dir, 'train_audio_names.csv')
