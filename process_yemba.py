@@ -10,6 +10,7 @@ import logging
 import pickle
 from pydub import AudioSegment
 from pydub.exceptions import CouldntDecodeError
+from sklearn.model_selection import train_test_split
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Set the seed value for experiment reproducibility.
@@ -169,32 +170,76 @@ if __name__ == "__main__":
     
     # After moving and converting all files, delete the original audio folder
     shutil.rmtree(f'{extract_path}/audios/')
-
+    
     # Assuming audio files are now in their respective word folders
     data_dir = pathlib.Path(extract_path)
+    train_dir = pathlib.Path('data/yemba/train')
+    test_dir = pathlib.Path('data/yemba/test')
+    save_dir = 'saved_datasets/yemba_command'
 
-    # Load the dataset
-    train_ds, val_ds = tf.keras.utils.audio_dataset_from_directory(
-        directory=data_dir,
-        batch_size=64,
-        validation_split=0.2,
-        seed=0,
-        output_sequence_length=16000,
-        subset='both')
+    # Ensure the train and test directories are created
+    os.makedirs(train_dir, exist_ok=True)
+    os.makedirs(test_dir, exist_ok=True)
+    os.makedirs(save_dir, exist_ok=True)
 
+    # Data structures to hold filenames
+    train_files = []
+    test_files = []
+
+# Split files into train and test sets while preserving class distribution
+    for class_dir in os.listdir(data_dir):
+        class_path = os.path.join(data_dir, class_dir)
+        if os.path.isdir(class_path):
+            files = [f for f in os.listdir(class_path) if f.endswith('.wav')]
+            if len(files)==0:
+               continue
+        # Split files into train and test sets
+            train_files_list, test_files_list = train_test_split(files, test_size=0.2, random_state=42)
+        
+        # Create class folders in train and test directories
+            os.makedirs(os.path.join(train_dir, class_dir), exist_ok=True)
+            os.makedirs(os.path.join(test_dir, class_dir), exist_ok=True)
+        
+        # Move files to the corresponding train/test class folders and record filenames
+            for file_name in train_files_list:
+               train_files.append(os.path.join(class_dir, file_name))
+               shutil.move(os.path.join(class_path, file_name), os.path.join(train_dir, class_dir, file_name))
+        
+            for file_name in test_files_list:
+               test_files.append(os.path.join(class_dir, file_name))
+               shutil.move(os.path.join(class_path, file_name), os.path.join(test_dir, class_dir, file_name))
+
+# Save filenames to CSV
+    #pd.DataFrame({'train_filenames': train_files}).to_csv(os.path.join(save_dir, 'train_audio_names.csv'), index=False)
+    #pd.DataFrame({'test_filenames': test_files}).to_csv(os.path.join(save_dir, 'test_audio_names.csv'), index=False)
+
+# Remove the original class folders
+#    for class_dir in os.listdir(data_dir):
+#        class_path = os.path.join(data_dir, class_dir)
+#        if os.path.isdir(class_path):
+#           shutil.rmtree(class_path)
+
+    logging.info("Original class folders removed and filenames saved.")
+    
+    
+
+    # Load the train dataset
+    train_ds = tf.keras.utils.audio_dataset_from_directory(
+    directory=train_dir,
+    batch_size=64,
+    output_sequence_length=16000,
+    seed=42)
+
+# Load the test dataset
+    val_ds = tf.keras.utils.audio_dataset_from_directory(
+    directory=test_dir,
+    batch_size=64,
+    output_sequence_length=16000,
+    seed=42)
     label_names = np.array(train_ds.class_names)
     logging.info(f"Label names: {label_names}")
     # Collect filenames manually by traversing the directory
-    train_filenames = []
-    val_filenames = []
-    for file_path in data_dir.glob('**/*.wav'):
-        if os.path.basename(os.path.dirname(file_path)) in np.array(train_ds.class_names):
-            train_filenames.append(os.path.basename(file_path))
-        else:
-            val_filenames.append(os.path.basename(file_path))
-    # Save label_names to a file using pickle
-    with open('label_names.pkl', 'wb') as f:
-        pickle.dump(label_names, f)
+    
 
     train_ds = train_ds.map(squeeze, tf.data.AUTOTUNE)
     val_ds = val_ds.map(squeeze, tf.data.AUTOTUNE)
@@ -206,8 +251,8 @@ if __name__ == "__main__":
     os.makedirs(save_dir, exist_ok=True)
 
     # Save filenames to CSV
-    save_filenames_to_csv(train_filenames, save_dir, 'train_audo_names.csv')
-    save_filenames_to_csv(val_filenames, save_dir, 'test_audio_names.csv')
+    save_filenames_to_csv(train_files, save_dir, 'train_audio_names.csv')
+    save_filenames_to_csv(test_files, save_dir, 'test_audio_names.csv')
 
     train_spectrogram_ds = make_spec_ds(train_ds, feature, drop_int, drop_freq)
     val_spectrogram_ds = make_spec_ds(val_ds, feature, drop_int, drop_freq)
