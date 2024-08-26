@@ -161,7 +161,7 @@ def generate_embeddings(gcn_model, dgl_G,num_existing_nodes, new_node_spectrogra
     #print(embeddings.shape)
     #print(new_node_indices)
     
-    return embeddings[num_existing_nodes:], new_node_embeddings
+    return embeddings[:num_existing_nodes], new_node_embeddings
 
 
 def generate_embeddings_hetero(gcn_model, hetero_graph,num_existing_acoustic_nodes, new_node_spectrograms):
@@ -209,7 +209,7 @@ def generate_embeddings_hetero(gcn_model, hetero_graph,num_existing_acoustic_nod
     new_node_indices = np.arange(num_existing_acoustic_nodes, num_existing_acoustic_nodes + num_new_nodes)
     new_node_embeddings = embeddings[new_node_indices]
     
-    return embeddings[num_existing_acoustic_nodes:], new_node_embeddings
+    return embeddings[:num_existing_acoustic_nodes], new_node_embeddings
     
 
 
