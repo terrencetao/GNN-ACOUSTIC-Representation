@@ -202,11 +202,11 @@ if __name__ == "__main__":
         
         # Move files to the corresponding train/test class folders and record filenames
             for file_name in train_files_list:
-               train_files.append(os.path.join(class_dir, file_name))
+               train_files.append( file_name)
                shutil.move(os.path.join(class_path, file_name), os.path.join(train_dir, class_dir, file_name))
         
             for file_name in test_files_list:
-               test_files.append(os.path.join(class_dir, file_name))
+               test_files.append(file_name)
                shutil.move(os.path.join(class_path, file_name), os.path.join(test_dir, class_dir, file_name))
 
 # Save filenames to CSV
