@@ -13,7 +13,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
-from generate_similarity_matrix_acoustic import compute_distance_for_pair, compute_dtw_distance
+from generate_similarity_matrix_acoustic import compute_distance_for_pair, compute_dtw_distance, distance_dtw
 
 import logging
 from joblib import Parallel, delayed
@@ -61,69 +61,47 @@ def add_new_nodes_to_graph_randomly(dgl_G, new_node_spectrograms, k, distance_fu
             dgl_G.add_edges(src, dst, {'weight': torch.tensor([weight], dtype=torch.float32)})
     
     return dgl_G, num_existing_nodes
-    
-    
-def add_new_acoustic_nodes_to_hetero_graph(hetero_graph, new_node_spectrograms, k, distance_function, ml_model, threshold_probability, n_jobs=-1):
-    num_existing_acoustic_nodes = hetero_graph.num_nodes('acoustic')
-    num_existing_word_nodes = hetero_graph.num_nodes('word')
+
+def add_new_nodes_to_graph_knn(dgl_G, new_node_spectrograms, k, distance_function, n_jobs=-1):
+    num_existing_nodes = dgl_G.number_of_nodes()
     num_new_nodes = new_node_spectrograms.shape[0]
     
-    # Add new 'acoustic' nodes to the graph
-    hetero_graph.add_nodes(num_new_nodes, ntype='acoustic')
-    
-    # Add features for the new 'acoustic' nodes
-    flattened_spectrograms = flatten_spectrograms(new_node_spectrograms)
-    new_features = torch.from_numpy(flattened_spectrograms)
-    hetero_graph.nodes['acoustic'].data['feat'][num_existing_acoustic_nodes:num_existing_acoustic_nodes  + num_new_nodes] = new_features
+    # Add new nodes to the graph
+    dgl_G.add_nodes(num_new_nodes)
 
-    # Get softmax probabilities for connections to 'word' nodes using the ML model
-    ml_model.eval()
-    new_node_features = torch.tensor(new_node_spectrograms)
-    new_node_features = new_node_features.view(new_node_features.shape[0],1 , new_node_features.shape[1], new_node_features.shape[2])
-# Predict softmax probabilities
-    with torch.no_grad():  # Disable gradient calculation
-         logits = ml_model(new_node_features)
-         ml_predictions = F.softmax(logits, dim=1)
-         
-    
-    ml_probabilities = ml_predictions
-    
-    # Filter probabilities based on the threshold
-    ml_probabilities = filter_similarity_matrix(ml_probabilities.numpy(), threshold=threshold_probability, k=k)
-    
+    # Add features for the new nodes
+    new_features = torch.from_numpy(new_node_spectrograms)
+    dgl_G.ndata['feat'][num_existing_nodes:num_existing_nodes + num_new_nodes] = new_features
+
+    existing_features = dgl_G.ndata['feat'][:num_existing_nodes].numpy()
+
     def process_new_node(new_node_index):
+        new_node_spectrogram = new_node_spectrograms[new_node_index - num_existing_nodes]
+        
+        # Compute distances to all existing nodes
+        distances = [distance_function(new_node_spectrogram, existing_features[i]) for i in range(num_existing_nodes)]
+        
+        # Select the k nearest neighbors
+        nearest_indices = np.argsort(distances)[:k]
+        
         edges = []
-        probabilities = []
-        for word_node_index in range(num_existing_word_nodes):
-            similarity = ml_probabilities[new_node_index - num_existing_acoustic_nodes, word_node_index]
-            if similarity > 0:
-                edges.append((new_node_index, word_node_index))
-                probabilities.append(similarity)
-        return edges, probabilities
+        for i in nearest_indices:
+            distance = distances[i]
+            similarity = np.exp(-distance)
+            edges.append((new_node_index, i, similarity))
+            edges.append((i, new_node_index, similarity))
+        return edges
 
     # Use joblib to parallelize the processing of new nodes
-    all_edges_and_probs = Parallel(n_jobs=n_jobs)(delayed(process_new_node)(new_node_index) for new_node_index in tqdm(range(num_existing_acoustic_nodes, num_existing_acoustic_nodes + num_new_nodes)))
+    all_edges = Parallel(n_jobs=n_jobs)(delayed(process_new_node)(new_node_index) for new_node_index in tqdm(range(num_existing_nodes, num_existing_nodes + num_new_nodes)))
     
     # Flatten the list of edges and add them to the graph
-    all_edges = [edge for edges, _ in all_edges_and_probs for edge in edges]
-    all_probabilities = [prob for _, probs in all_edges_and_probs for prob in probs]
-    
-    if all_edges:
-        src, dst = zip(*all_edges)
-        src = torch.tensor(src, dtype=torch.int64)
-        dst = torch.tensor(dst, dtype=torch.int64)
-        hetero_graph.add_edges(src, dst, etype=('acoustic', 'related_to', 'word'))
-        new_weights = torch.tensor(all_probabilities, dtype=torch.float32)
-        if 'weight' not in hetero_graph.edges['related_to'].data:
-           num_existing_edges = hetero_graph.num_edges(('acoustic', 'related_to', 'word'))
-           hetero_graph.edges['related_to'].data['weight'] = torch.zeros(num_existing_edges, dtype=torch.float32)
-    
-    # Assign new edge weights to the new edges only
-        hetero_graph.edges['related_to'].data['weight'][-new_weights.shape[0]:] = new_weights
+    src_nodes, dst_nodes, weights = zip(*[(src, dst, weight) for edges in all_edges for src, dst, weight in edges])
+    dgl_G.add_edges(src_nodes, dst_nodes, {'weight': torch.tensor(weights, dtype=torch.float32)})
 
-        #hetero_graph.edges['related_to'].data['weight'][num_existing_acoustic_nodes:num_existing_acoustic_nodes  + num_new_nodes] = torch.tensor(all_probabilities, dtype=torch.float32)
-    return hetero_graph, num_existing_acoustic_nodes
+    return dgl_G, num_existing_nodes    
     
+
     
     
 def generate_embeddings(gcn_model, dgl_G,num_existing_nodes, new_node_spectrograms):
@@ -164,52 +142,7 @@ def generate_embeddings(gcn_model, dgl_G,num_existing_nodes, new_node_spectrogra
     return embeddings[:num_existing_nodes], new_node_embeddings
 
 
-def generate_embeddings_hetero(gcn_model, hetero_graph,num_existing_acoustic_nodes, new_node_spectrograms):
-    """
-    Generate embeddings for new nodes using the provided GCN model.
-    
-    Parameters:
-    gcn_model (torch.nn.Module): The trained GCN model.
-    hetero_graph (dgl.DGLHeteroGraph): The heterogeneous graph structure.
-    new_node_spectrograms (np.ndarray): Spectrograms of the new nodes to be added.
-    k (int): The number of neighbors to connect each new node to.
-    compute_distance (function): A function to compute the distance between nodes.
-    ml_model (tf.keras.Model): The ML model for predicting connection probabilities.
-    threshold_probability (float): The threshold for filtering connection probabilities.
-    n_jobs (int): The number of jobs for parallel processing.
 
-    Returns:
-    np.ndarray: Embeddings for the new nodes.
-    """
-    # Add new 'acoustic' nodes to the graph
-    #hetero_graph, num_existing_acoustic_nodes = add_new_acoustic_nodes_to_hetero_graph(
-    #    hetero_graph, 
-    #    new_node_spectrograms, 
-    #    k, 
-    #    compute_distance, 
-    #    ml_model, 
-    #    threshold_probability, 
-    #    n_jobs
-    #)
-    
-    # Extract features from the graph
-    features_dic = {
-    'acoustic': hetero_graph.nodes['acoustic'].data['feat'],
-    'word': hetero_graph.nodes['word'].data['feat']
-}
-    # Generate embeddings using the GCN model
-    with torch.no_grad():
-        gcn_model.eval()
-        # Assuming the GCN model takes the graph and node features as input
-        embeddings = gcn_model(hetero_graph, features_dic)
-        embeddings = embeddings['acoustic'].numpy()
-    
-    # Extract the embeddings for the new nodes
-    num_new_nodes = new_node_spectrograms.shape[0]
-    new_node_indices = np.arange(num_existing_acoustic_nodes, num_existing_acoustic_nodes + num_new_nodes)
-    new_node_embeddings = embeddings[new_node_indices]
-    
-    return embeddings[:num_existing_acoustic_nodes], new_node_embeddings
     
 
 
@@ -273,8 +206,20 @@ model_sup_path = os.path.join(model_folder, "gnn_model.pth")
 loaded_model_sup = GCN(in_feats, hidden_size, num_classes, conv_param, hidden_units)
 loaded_model_sup.load_state_dict(torch.load(model_sup_path))
 
-logging.info(f'Extract acoustic node representations From supervised GNN')
-dgl_G, num_existing_nodes = add_new_nodes_to_graph_randomly(dgl_G, new_node_spectrograms=subset_val_spectrograms,  k=int(args.num_n_a), distance_function=compute_dtw_distance)
+kws_graph_path_val = os.path.join(graph_folder, f"kws_graph_val_{args.num_n_a}_{args.sub_units}.dgl")
+if not os.path.isfile(kws_graph_path_val):
+  logging.info(f'Extract acoustic node representations from supervised GCN')
+  dgl_G, num_existing_nodes = add_new_nodes_to_graph_knn(dgl_G, new_node_spectrograms=subset_val_spectrograms,  k=int(args.num_n_a), distance_function=distance_dtw)
+
+  print(dgl_G.number_of_nodes())
+  kws_graph_path_val = os.path.join(graph_folder, f"kws_graph_val_{args.num_n_a}_{args.sub_units}.dgl")
+  dgl.save_graphs(kws_graph_path_val, [dgl_G])
+  print(f"dgl val save successfully")
+else:
+  print(f"File {kws_graph_path_val} already exists. Skipping computation.")
+  num_existing_nodes = dgl_G.number_of_nodes()
+  glist, label_dict= load_graphs(kws_graph_path_val)
+  dgl_G = glist[0]
 node_embeddings_sup, node_val_embeddings_sup = generate_embeddings(gcn_model=loaded_model_sup, 
                                                 dgl_G=dgl_G,num_existing_nodes=num_existing_nodes, new_node_spectrograms=subset_val_spectrograms, 
                                                )

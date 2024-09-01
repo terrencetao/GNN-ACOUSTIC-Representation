@@ -68,13 +68,13 @@ def sampler(spectrogram, dim, drop=None):
         spectrogram_downsampled = spectrogram
     return spectrogram_downsampled
 
-def drop_out(spectrogram, drop_int=None, drop_freq=None):
-    spectrogram_downsampled = tf.zeros_like(spectrogram)
-    if drop_int:
-        spectrogram_downsampled = sampler(spectrogram, dim=1, drop=drop_int)
-    if drop_freq:
-        spectrogram_downsampled = sampler(spectrogram_downsampled, dim=2, drop=drop_freq)
-    return spectrogram_downsampled
+def drop_out(spectrogram, drop_int=None, drop_freq=None ):
+  spectrogram_downsampled =  spectrogram
+  if drop_int>0.0:
+     spectrogram_downsampled =  sampler(spectrogram, dim=1, drop=drop_int )
+  if drop_freq>0.0:
+     spectrogram_downsampled = sampler(spectrogram_downsampled, dim=2, drop=drop_freq )
+  return spectrogram
 
 def get_mfcc(waveform, sample_rate, drop_int=None, drop_freq=None, num_mel_bins=40, num_mfccs=13):
     
@@ -210,15 +210,7 @@ if __name__ == "__main__":
                test_files.append(file_name)
                shutil.move(os.path.join(class_path, file_name), os.path.join(test_dir, class_dir, file_name))
 
-# Save filenames to CSV
-    #pd.DataFrame({'train_filenames': train_files}).to_csv(os.path.join(save_dir, 'train_audio_names.csv'), index=False)
-    #pd.DataFrame({'test_filenames': test_files}).to_csv(os.path.join(save_dir, 'test_audio_names.csv'), index=False)
 
-# Remove the original class folders
-#    for class_dir in os.listdir(data_dir):
-#        class_path = os.path.join(data_dir, class_dir)
-#        if os.path.isdir(class_path):
-#           shutil.rmtree(class_path)
 
     logging.info("Original class folders removed and filenames saved.")
     
@@ -231,7 +223,7 @@ if __name__ == "__main__":
     output_sequence_length=16000,
     seed=42)
 
-# Load the test dataset
+    # Load the test dataset
     val_ds = tf.keras.utils.audio_dataset_from_directory(
     directory=test_dir,
     batch_size=64,
@@ -239,14 +231,14 @@ if __name__ == "__main__":
     seed=42)
     label_names = np.array(train_ds.class_names)
     logging.info(f"Label names: {label_names}")
-    # Collect filenames manually by traversing the directory
     
-
+    
+    
     train_ds = train_ds.map(squeeze, tf.data.AUTOTUNE)
     val_ds = val_ds.map(squeeze, tf.data.AUTOTUNE)
 
    
-
+    
     # Save filenames to CSV
     save_filenames_to_csv(train_files, save_dir, 'train_audio_names.csv')
     save_filenames_to_csv(test_files, save_dir, 'test_audio_names.csv')
@@ -258,9 +250,6 @@ if __name__ == "__main__":
     save_dataset(train_spectrogram_ds, os.path.join(save_dir, 'train_spectrogram_ds'))
     save_dataset(val_spectrogram_ds, os.path.join(save_dir, 'val_spectrogram_ds'))
     
-    # Save the datasets as Pickle files
-    #save_dataset_as_pickle(train_spectrogram_ds, os.path.join(save_dir, 'train_spectrograms.pkl'))
-    #save_dataset_as_pickle(val_spectrogram_ds, os.path.join(save_dir, 'val_spectrograms.pkl'))
-
+    
     logging.info("Script executed successfully.")
 

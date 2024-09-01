@@ -13,7 +13,7 @@ import argparse
 
 
 
-
+from dtw import dtw as dt
 import numpy as np
 import dgl
 import torch
@@ -36,7 +36,22 @@ def extract_spectrograms(dataset):
             labels.append(label.numpy())
     return spectrograms, labels
 
-
+def distance_dtw(node_1, node_2):
+    """
+       input :
+         node_1: matrix numpy (mfcc)
+         node_2: matrix numpy (mfcc)
+       purpose : compute distance between 2 nodes
+       output : scalar
+                distance
+    """
+    distance, _, _, _ = dt(node_1.T, node_2.T, dist=lambda x, y: np.linalg.norm(x - y, ord=1))
+    return distance
+    
+    # Wrapper function for parallel processing
+def compute_distance_for_pair(spectrograms, i, j):
+    distance = distance_dtw(spectrograms[i], spectrograms[j])
+    return i, j, distance
 
 # Function to compute DTW distance between two spectrograms using dtaidistance
 def compute_dtw_distance(spectrogram1, spectrogram2):

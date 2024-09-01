@@ -169,6 +169,7 @@ if __name__ == "__main__":
 	train(model1, dgl_G, features,edge_weights, labels,int(args.epochs))
 
 	# Define the file path for saving the model
+	os.makedirs('models', exist_ok=True)
 	model_path = os.path.join('models',"gnn_model.pth")
 
 	# Save the model
