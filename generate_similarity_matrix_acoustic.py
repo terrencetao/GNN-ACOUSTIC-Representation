@@ -53,18 +53,9 @@ def compute_distance_for_pair(spectrograms, i, j):
     distance = distance_dtw(spectrograms[i], spectrograms[j])
     return i, j, distance
 
-# Function to compute DTW distance between two spectrograms using dtaidistance
-def compute_dtw_distance(spectrogram1, spectrogram2):
-    distances = []
-    for k in range(spectrogram1.shape[0]):  # iterate over frequency bins
-        d = dtw.distance(spectrogram1[k, :], spectrogram2[k, :])
-        distances.append(d)
-    return np.mean(distances)
 
-# Wrapper function for parallel processing
-def compute_distance_for_pair(spectrograms, i, j):
-    distance = compute_dtw_distance(spectrograms[i], spectrograms[j])
-    return i, j, distance
+
+
 
 def compute_dtw_similarity_matrix(spectrograms):
     num_spectrograms = len(spectrograms)
@@ -123,20 +114,39 @@ def compute_iqr_thresholds(similarity_matrix, labels):
 
     return iqr_thresholds
     
-def sim_matrix(method,subset_labels=None, subset_spectrograms=None):
-   if method == 'dtw':
-      similarity_matrix = compute_dtw_similarity_matrix(subset_spectrograms)
-   elif method == 'fixed':
-   # Convert labels list to a NumPy array
-      labels_train_np = np.copy(subset_labels)
+def sim_matrix(method, subset_labels=None, subset_spectrograms=None):
+    """
+    Compute a similarity matrix using the specified method.
 
-# Create a comparison matrix
-      comparison_matrix = labels_train_np[:, None] == labels_train_np[None, :]
-
-# Convert boolean matrix to integer matrix (0 and 1)
-      similarity_matrix = comparison_matrix.astype(int)
-
-   return similarity_matrix
+    Parameters:
+    - method (str): The method to use ('dtw' for Dynamic Time Warping or 'fixed' for label-based similarity).
+    - subset_labels (list or np.ndarray): Labels corresponding to the data, used for the 'fixed' method.
+    - subset_spectrograms (np.ndarray): Spectrograms for the 'dtw' method.
+    
+    Returns:
+    - similarity_matrix (np.ndarray): Computed similarity matrix.
+    """
+    
+    if method == 'dtw':
+        if subset_spectrograms is None:
+            raise ValueError("subset_spectrograms is required for DTW similarity computation.")
+        # Compute similarity using DTW
+        similarity_matrix = compute_dtw_similarity_matrix(subset_spectrograms)
+    
+    elif method == 'fixed':
+        if subset_labels is None:
+            raise ValueError("subset_labels is required for label-based similarity computation.")
+        
+        # Convert labels to a NumPy array for consistency
+        labels_train_np = np.copy(subset_labels)
+        
+        # Create a comparison matrix (1 for same labels, 0 otherwise)
+        similarity_matrix = (labels_train_np[:, None] == labels_train_np[None, :]).astype(int)
+    
+    else:
+        raise ValueError(f"Unknown method: {method}. Supported methods are 'dtw' and 'fixed'.")
+    
+    return similarity_matrix
    
    
 # Function to perform stratified sampling
@@ -266,7 +276,8 @@ if __name__ == "__main__":
 
 		similarity_matrix = sim_matrix(method=args.method,  subset_labels=subset_labels, subset_spectrograms=subset_spectrograms)
 
-		print(similarity_matrix)
+		print(np.where(similarity_matrix[1, :] == 1)[0])
+		
 		# Append labels as an additional column
 		matrix_with_labels = np.hstack((subset_labels[:, np.newaxis], similarity_matrix))
 		

@@ -13,56 +13,42 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
-from generate_similarity_matrix_acoustic import compute_distance_for_pair, compute_dtw_distance, distance_dtw
-
+from generate_similarity_matrix_acoustic import compute_distance_for_pair,  distance_dtw
+import math
 import logging
 from joblib import Parallel, delayed
 import tensorflow as tf
-
+from weak_ML2 import SimpleCNN
 from tqdm import tqdm
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def load_graphs(path):
     return dgl.load_graphs(path)
-    
 
-def add_new_nodes_to_graph_randomly(dgl_G, new_node_spectrograms, k, distance_function, n_jobs=-1):
-    num_existing_nodes = dgl_G.number_of_nodes()
-    num_new_nodes = new_node_spectrograms.shape[0]
+def ml_distance(ml_model, spec1, spec2):
+    ml_model.eval()
+    # Ensure the input spectrograms are in the correct shape for the model
+    spec1 = torch.tensor(spec1).unsqueeze(0)  # Add batch dimension
+    spec2 = torch.tensor(spec2).unsqueeze(0)  # Add batch dimension
     
-    # Add new nodes to the graph
-    dgl_G.add_nodes(num_new_nodes)
-
-    # Add features for the new nodes
-    new_features = torch.from_numpy(new_node_spectrograms)
-    dgl_G.ndata['feat'][num_existing_nodes:num_existing_nodes + num_new_nodes] = new_features
-
-    # Randomly select k nodes from the existing graph for each new node
-    existing_indices = np.arange(num_existing_nodes)
+    # Stack the spectrograms into a batch
+    batch = torch.stack([spec1, spec2], dim=0)
     
-    def process_new_node(new_node_index):
-        selected_indices = np.random.choice(existing_indices, k, replace=False)
-        new_node_spectrogram = new_node_spectrograms[new_node_index - num_existing_nodes]
-        
-        edges = []
-        for i in selected_indices:
-            distance = distance_function(new_node_spectrogram, dgl_G.ndata['feat'][i].numpy())
-            similarity = np.exp(-distance)
-            edges.append((new_node_index, i, similarity))
-            edges.append((i, new_node_index, similarity))
-        return edges
-
-    # Use joblib to parallelize the processing of new nodes
-    all_edges = Parallel(n_jobs=n_jobs)(delayed(process_new_node)(new_node_index) for new_node_index in tqdm(range(num_existing_nodes, num_existing_nodes + num_new_nodes)))
     
-    # Flatten the list of edges and add them to the graph
-    for edges in all_edges:
-        for src, dst, weight in edges:
-            dgl_G.add_edges(src, dst, {'weight': torch.tensor([weight], dtype=torch.float32)})
     
-    return dgl_G, num_existing_nodes
+    # Pass the batch through the model
+    with torch.no_grad():  # Disable gradient calculation
+        logits = ml_model(batch)
+        ml_predictions = F.softmax(logits, dim=1)
+    
+    # Calculate the KL divergence (or another distance measure) between the predictions
+    kl_divergence = F.kl_div(ml_predictions[0].log(), ml_predictions[1], reduction='batchmean')
+    
+    return kl_divergence   
 
-def add_new_nodes_to_graph_knn(dgl_G, new_node_spectrograms, k, distance_function, n_jobs=-1):
+
+
+def add_new_nodes_to_graph_knn(dgl_G, new_node_spectrograms, k, distance_function,ml, n_jobs=-1):
     num_existing_nodes = dgl_G.number_of_nodes()
     num_new_nodes = new_node_spectrograms.shape[0]
     
@@ -79,7 +65,7 @@ def add_new_nodes_to_graph_knn(dgl_G, new_node_spectrograms, k, distance_functio
         new_node_spectrogram = new_node_spectrograms[new_node_index - num_existing_nodes]
         
         # Compute distances to all existing nodes
-        distances = [distance_function(new_node_spectrogram, existing_features[i]) for i in range(num_existing_nodes)]
+        distances = [distance_function(ml,new_node_spectrogram, existing_features[i]) for i in range(num_existing_nodes)]
         
         # Select the k nearest neighbors
         nearest_indices = np.argsort(distances)[:k]
@@ -128,7 +114,8 @@ def generate_embeddings(gcn_model, dgl_G,num_existing_nodes, new_node_spectrogra
     # Generate embeddings using the GCN model
     with torch.no_grad():
         gcn_model.eval()
-        embeddings = gcn_model(dgl_G, features, edge_weights).numpy()
+        _,embeddings = gcn_model(dgl_G, features, edge_weights)
+        embeddings = embeddings.numpy()
     
     # Extract the embeddings for the new nodes
     num_new_nodes = new_node_spectrograms.shape[0]
@@ -195,7 +182,7 @@ subset_val_spectrograms = np.load(os.path.join(matrix_folder,f'subset_val_spectr
 
 # Define the input features size
 in_feats = features[0].shape[0] * features[0].shape[1]
-hidden_size = 64
+hidden_size = 512
 num_classes = len(torch.unique(labels))
 conv_param = [(1, 3, (20, 64)), 32, 2]
 hidden_units = [32, 32]
@@ -207,11 +194,11 @@ loaded_model_sup = GCN(in_feats, hidden_size, num_classes, conv_param, hidden_un
 loaded_model_sup.load_state_dict(torch.load(model_sup_path))
 
 kws_graph_path_val = os.path.join(graph_folder, f"kws_graph_val_{args.num_n_a}_{args.sub_units}.dgl")
+acoustic_model =  torch.load('models/cnn.pth')
 if not os.path.isfile(kws_graph_path_val):
   logging.info(f'Extract acoustic node representations from supervised GCN')
-  dgl_G, num_existing_nodes = add_new_nodes_to_graph_knn(dgl_G, new_node_spectrograms=subset_val_spectrograms,  k=int(args.num_n_a), distance_function=distance_dtw)
-
-  print(dgl_G.number_of_nodes())
+  dgl_G, num_existing_nodes = add_new_nodes_to_graph_knn(dgl_G, new_node_spectrograms=subset_val_spectrograms,  k=math.floor(int(args.num_n_a)/2), distance_function=ml_distance, ml=acoustic_model)
+  
   kws_graph_path_val = os.path.join(graph_folder, f"kws_graph_val_{args.num_n_a}_{args.sub_units}.dgl")
   dgl.save_graphs(kws_graph_path_val, [dgl_G])
   print(f"dgl val save successfully")
@@ -236,6 +223,14 @@ loaded_model_unsup.load_state_dict(torch.load(model_unsup_path))
 np.save(os.path.join(embedding_folder, f'supervised_node_embeddings_{args.sub_units}.npy'), node_embeddings_sup)
 np.save(os.path.join(embedding_folder, f'supervised_node_val_embeddings_{args.sub_units}.npy'), node_val_embeddings_sup)
 
+# Load hibrid GCN model
+logging.info(f'Load unsupervised GCN model')
+model_hibrid_path = os.path.join(model_folder, "gnn_model_hibrid.pth")
+loaded_model_hibrid = GCN(in_feats, hidden_size, num_classes, conv_param, hidden_units)
+loaded_model_hibrid.load_state_dict(torch.load(model_hibrid_path))
+
+
+
 
 
 
@@ -257,5 +252,12 @@ np.save(os.path.join(embedding_folder, f'unsupervised_node_embeddings_{args.sub_
 np.save(os.path.join(embedding_folder, f'unsupervised_node_val_embeddings_{args.sub_units}.npy'), node_val_embeddings_unsup)
 
 
+
+logging.info(f'Extract acoustic node representations From unsupervised GNN')
+node_embeddings_hibrid, node_val_embeddings_hibrid = generate_embeddings(gcn_model=loaded_model_hibrid, 
+                                                dgl_G=dgl_G,num_existing_nodes=num_existing_nodes, new_node_spectrograms=subset_val_spectrograms, )
+# Save the hibrid embeddings to .npy files in the new path
+np.save(os.path.join(embedding_folder, f'hibrid_node_embeddings_{args.sub_units}.npy'), node_embeddings_hibrid)
+np.save(os.path.join(embedding_folder, f'hibrid_node_val_embeddings_{args.sub_units}.npy'), node_val_embeddings_hibrid)
 
 

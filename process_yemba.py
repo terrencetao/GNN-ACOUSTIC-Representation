@@ -107,7 +107,7 @@ def make_spec_ds(ds, feature, drop_int=None, drop_freq=None):
             num_parallel_calls=tf.data.AUTOTUNE)
     elif feature == 'mfcc':
         return ds.map(
-            map_func=lambda audio, label: (get_mfcc(audio, 16000, drop_int, drop_freq), label),
+            map_func=lambda audio, label: (get_mfcc(audio, 44100, drop_int, drop_freq), label),
             num_parallel_calls=tf.data.AUTOTUNE)
 
 def squeeze(audio, labels):
@@ -233,7 +233,9 @@ if __name__ == "__main__":
     logging.info(f"Label names: {label_names}")
     
     
-    
+    # Save label_names to a file using pickle
+    with open('label_names_yemba_command.pkl', 'wb') as f:
+        pickle.dump(label_names, f)
     train_ds = train_ds.map(squeeze, tf.data.AUTOTUNE)
     val_ds = val_ds.map(squeeze, tf.data.AUTOTUNE)
 

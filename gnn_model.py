@@ -16,6 +16,7 @@ import torch.nn as nn
 import networkx as nx
 import dgl
 import logging
+import torch.optim.lr_scheduler as lr_scheduler
 
 class CNN(nn.Module):
     def __init__(self, conv_param, hidden_units):
@@ -72,27 +73,56 @@ class GCN(nn.Module):
         self.cnn = CNN(conv_param=conv_param, hidden_units=hidden_units)
         #self.conv1 = SAGEConv(hidden_units[-1], hidden_size, 'mean')
         self.conv1 = SAGEConv(in_feats, hidden_size, 'mean')
-        self.conv2 = SAGEConv(hidden_size, num_classes, 'mean')
-
+        self.conv2 = SAGEConv(hidden_size, 128, 'mean')
+        # Final linear layer for classification
+        self.layers_1 = nn.Linear(128, 64) 
+        self.layers_2 = nn.Linear(64, 32)
+        self.layers_3 = nn.Linear(32, num_classes)
     def forward(self, g, features, edge_weights):
         #x = self.cnn(features.unsqueeze(1)).squeeze(1)
-        x = self.flatten(features)
+        x = self.flatten(features)  # Assuming features have already gone through CNN
         x = F.relu(self.conv1(g, x, edge_weights))
+        embeddings = self.conv2(g, x, edge_weights)
         x = self.conv2(g, x, edge_weights)
-        return x
+        x = F.relu(self.layers_1(x)) # Logits from linear layer
+        x = F.relu(self.layers_2(x)) # Logits from linear layer
+        x = self.layers_3(x)
+        
+        
+        
+        return x, embeddings
 
-# Define the training function
-def train(model, g, features, edge_weights, labels, epochs=100, lr=0.01):
+
+            
+def train(model, g, features, edge_weights, labels, epochs=100, lr=0.001):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, verbose=True)
+    model.train()  # Set model to training mode
     for epoch in range(epochs):
-        model.train()
-        logits = model(g, features, edge_weights)
+        # Forward pass
+        logits,_ = model(g, features, edge_weights)
+        
+        # Compute loss
         loss = F.cross_entropy(logits, labels)
+
+        # Backward pass and optimization
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        if epoch % 10 == 0:
-            print(f'Epoch {epoch}, Loss: {loss.item()}')
+        
+        # Update the learning rate scheduler
+        scheduler.step(loss)
+        
+        # Log loss and optionally other metrics every 10 epochs
+        if epoch % 10 == 0 or epoch==epochs:
+            # You can also compute accuracy here
+            _, predicted = torch.max(logits, 1)
+            correct = (predicted == labels).sum().item()
+            accuracy = correct / labels.size(0)
+            
+            print(f'Epoch {epoch}, Loss: {loss.item()}, Accuracy: {accuracy*100:.2f}%')
+
+    return model
             
 
 
@@ -108,18 +138,66 @@ def topological_loss(embeddings, adj_matrix):
     return reconstruction_loss
 
 # Define the training function with topological loss
-def train_with_topological_loss(model, g, features, edge_weights,adj_matrix, epochs=100, lr=0.01):
+def train_with_topological_loss(model, g, features, edge_weights,adj_matrix, labels, epochs=100, lr=0.001):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, verbose=True)
+   
+        
+        # Create a comparison matrix (1 for same labels, 0 otherwise)
+    labels_np = labels.numpy()
+    matrix = (labels_np[:, None] == labels_np[None, :]).astype(float)
+    matrix = torch.tensor(matrix, dtype=torch.float32)  # Set dtype to float32
     for epoch in range(epochs):
-        model.train()
-        embeddings = model(g, features, edge_weights)
+        
+        logits, embeddings = model(g, features, edge_weights)
         loss = topological_loss(embeddings, adj_matrix)
+
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        if epoch % 10 == 0:
-            print(f'Epoch {epoch}, Loss: {loss.item()}')
+        
+        # Update the learning rate scheduler
+        scheduler.step(loss)
+        
+        # Log loss and optionally other metrics every 10 epochs
+        if epoch % 10 == 0 or epoch==epochs:
+            # You can also compute accuracy here
+            _, predicted = torch.max(logits, 1)
+            correct = (predicted == labels).sum().item()
+            accuracy = correct / labels.size(0)
+            
+            print(f'Epoch {epoch}, Loss: {loss.item()}, Accuracy: {accuracy*100:.2f}%')
+    return model
 
+def train_with_topological_and_cross_loss(model, g, features, edge_weights,adj_matrix, labels, epochs=100, lr=0.001):
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, verbose=True)
+    labels_np = labels.numpy()
+    # Create the similarity matrix for topological loss
+    matrix = (labels_np[:, None] == labels_np[None, :]).astype(float)
+    matrix = torch.tensor(matrix, dtype=torch.float32)  # Set dtype to float32
+    model.train()
+    for epoch in range(epochs):
+        
+        logits, embeddings = model(g, features, edge_weights)
+        loss = F.cross_entropy(logits, labels) + topological_loss(embeddings, adj_matrix)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        
+        # Update the learning rate scheduler
+        scheduler.step(loss)
+        
+        # Log loss and optionally other metrics every 10 epochs
+        if epoch % 10 == 0 or epoch==epochs:
+            # You can also compute accuracy here
+            _, predicted = torch.max(logits, 1)
+            correct = (predicted == labels).sum().item()
+            accuracy = correct / labels.size(0)
+            
+            print(f'Epoch {epoch}, Loss: {loss.item()}, Accuracy: {accuracy*100:.2f}%')
+    return model
 
 
 if __name__ == "__main__":
@@ -147,7 +225,7 @@ if __name__ == "__main__":
 	# Initialize the GCN model
 
 	in_feats = features[0].shape[0] * features[0].shape[1]
-	hidden_size = 64
+	hidden_size = 512
 	num_classes = len(labels.unique())  # Number of unique labels
 	conv_param = [
 	    # Paramètres de la première couche de convolution
@@ -161,12 +239,13 @@ if __name__ == "__main__":
 	hidden_units = [32, 32]
 	model1 = GCN(in_feats, hidden_size, num_classes, conv_param, hidden_units)
 	model2 = GCN(in_feats, hidden_size, num_classes, conv_param, hidden_units)
+	model3 = GCN(in_feats, hidden_size, num_classes, conv_param, hidden_units)
 
 
 
 	# Train the model
 
-	train(model1, dgl_G, features,edge_weights, labels,int(args.epochs))
+	model1 = train(model1, dgl_G, features,edge_weights, labels,int(args.epochs))
 
 	# Define the file path for saving the model
 	os.makedirs('models', exist_ok=True)
@@ -186,6 +265,13 @@ if __name__ == "__main__":
 
 	adj_matrix = adj_matrix.float()
 	features = features.float()
-	train_with_topological_loss(model2, dgl_G, features, edge_weights,adj_matrix, int(args.epochs))
-	model_path_sup = os.path.join('models',"gnn_model_unsup.pth")
-	torch.save(model2.state_dict(), model_path_sup)
+	
+	model3 = train_with_topological_and_cross_loss(model3, dgl_G, features, edge_weights,adj_matrix, labels, int(args.epochs))
+	model_path_hibrid = os.path.join('models',"gnn_model_hibrid.pth")
+	torch.save(model3.state_dict(), model_path_hibrid)
+	
+	model2 = train_with_topological_loss(model2, dgl_G, features, edge_weights,adj_matrix, labels, int(args.epochs))
+	model_path_unsup = os.path.join('models',"gnn_model_unsup.pth")
+	torch.save(model2.state_dict(), model_path_unsup)
+	
+	
